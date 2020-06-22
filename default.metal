@@ -1,7 +1,7 @@
 #import <metal_stdlib>
 using namespace metal;
 
-constexpr sampler _sampler(filter::linear,coord::normalized);
+constexpr sampler linear(filter::linear,coord::pixel);
 
 kernel void processimage(
     texture2d<float,access::sample> src[[texture(0)]],
@@ -10,6 +10,6 @@ kernel void processimage(
     uint2 gid[[thread_position_in_grid]]) {
     
     float2 uv = float2(gid)/resolution;
-    float3 rgb = src.sample(_sampler,uv).yzw;
+    float3 rgb = src.sample(linear,uv*resolution+float2(0.5,0.5)).yzw;
     dst.write(float4(1.0,rgb),gid);
 }
