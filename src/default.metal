@@ -9,7 +9,7 @@ kernel void processimage(
     constant float2 &resolution[[buffer(0)]],
     uint2 gid[[thread_position_in_grid]]) {
     
-    float2 uv = float2(gid)/resolution;
-    float3 rgb = src.sample(linear,uv*resolution+float2(0.5,0.5)).yzw;
+    float2 uv = (float2(gid)+float2(0.5,0.5))/resolution;
+    float3 rgb = src.sample(linear,uv*resolution).yzw;
     dst.write(float4(1.0,rgb),gid);
 }
