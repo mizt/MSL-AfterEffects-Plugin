@@ -20,7 +20,7 @@ namespace MSL {
     int texH = 0;
 
     id<MTLCommandQueue> queue = nil;
-    id<MTLBuffer> resolution= nil;
+    id<MTLBuffer> resolution = nil;
 
     dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
 

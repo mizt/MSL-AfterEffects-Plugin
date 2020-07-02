@@ -28,7 +28,7 @@ static PF_Err GlobalSetup(PF_InData *in_data, PF_OutData *out_data, PF_ParamDef 
     return err;
 }
 
-static PF_Err ParamsSetup(PF_InData *in_data,PF_OutData *out_data,PF_ParamDef *params[], PF_LayerDef *output) {
+static PF_Err ParamsSetup(PF_InData *in_data, PF_OutData *out_data, PF_ParamDef *params[], PF_LayerDef *output) {
     
     PF_Err err = PF_Err_NONE;
     out_data->num_params = MSL_NUM_PARAMS;
