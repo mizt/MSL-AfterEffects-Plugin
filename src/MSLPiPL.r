@@ -14,7 +14,7 @@ resource 'PiPL' (16000) {
             "mizt"
         },
         CodeMacIntel64 {"EntryPointFunc"},
-		CodeMacARM64 {"EntryPointFunc"},
+        CodeMacARM64 {"EntryPointFunc"},
         AE_PiPL_Version {
             2,
             0
