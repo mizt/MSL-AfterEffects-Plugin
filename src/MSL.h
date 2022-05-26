@@ -1,148 +1,199 @@
-#import <MetalKit/MetalKit.h>
+#import <Cocoa/Cocoa.h>
+#import <Metal/Metal.h>
+#import "FileManager.h"
+#import "MTLUtils.h"
+#import "MTLReadPixels.h"
+#import "ComputeShaderBase.h"
+
+template <typename T>
+class Bypass : public ComputeShaderBase<T> {
+
+    protected:
+    
+        const int SRC_TEXTURE = 0;
+        const int DST_TEXTURE = 1;
+        const int TEXTURE_NUM = 2;
+    
+        const int DST_BUFFER = 0;
+    
+        unsigned int *_pixels = nullptr;
+    
+    public:
+        
+        T *bytes() {
+            return (T *)this->_buffer[DST_BUFFER]->bytes();
+        }
+    
+        // for AE
+        unsigned int *BGRA(T *src, int row) {
+            
+            if(this->_pixels) {
+                
+                int w = this->_width;
+                int h = this->_height;
+
+                for(int i=0; i<h; i++) {
+                    for(int j=0; j<w; j++) {
+                        unsigned int pixel = src[i*row+j];
+                        this->_pixels[i*w+j] = (pixel&0xFF)<<24|pixel>>8;
+                    }
+                }
+                
+                return this->_pixels;
+            }
+            
+            return src;
+        }
+        
+        unsigned int *exec(T *src,bool isShader=true) {
+            
+            if(this->init()) {
+                
+                MTLUtils::replace(this->_texture[SRC_TEXTURE],src,this->width(),this->height(),this->width()<<2);
+        
+                ComputeShaderBase<T>::update();
+                this->_buffer[DST_BUFFER]->getBytes(this->_texture[DST_TEXTURE],isShader);
+                
+            }
+        
+            return this->bytes();
+        }
+        
+        Bypass(int w,int h, int bpp, NSString *shader, NSString *identifier) : ComputeShaderBase<T>(w,h) {
+                        
+            this->_useArgumentEncoder = false;
+            this->_buffer.push_back(new MTLReadPixels<unsigned int>(w,h,bpp,FileManager::resource(identifier,FileManager::addPlatform(@"copy.metallib"))));
+    
+            std::string type = @encode(T);
+            
+            MTLTextureDescriptor *descriptor = nil;
+            
+            if(type=="I"&&bpp==4) {
+                this->_pixels = new unsigned int[w*h];
+                descriptor = MTLUtils::descriptor(MTLUtils::PixelFormat8Unorm,w,h);
+            }
+            else if(type=="S"&&bpp==2) {
+                descriptor = MTLUtils::descriptor(MTLPixelFormatRG16Unorm,w,h);
+            }
+            else if(type=="f") {
+                if(bpp==1) descriptor = MTLUtils::descriptor(MTLPixelFormatR32Float,w,h);
+                else if(bpp==2) descriptor = MTLUtils::descriptor(MTLPixelFormatRG32Float,w,h);
+                else if(bpp==4) descriptor = MTLUtils::descriptor(MTLPixelFormatRGBA32Float,w,h);
+            }
+            
+            if(descriptor) {
+                descriptor.usage = MTLTextureUsageShaderWrite|MTLTextureUsageShaderRead;
+                
+                for(int k=0; k<TEXTURE_NUM; k++) {
+                    this->_texture.push_back([this->_device newTextureWithDescriptor:descriptor]);
+                }
+                                
+                ComputeShaderBase<T>::setup(FileManager::resource(identifier,FileManager::addPlatform(shader)));
+            }
+            else {
+                NSLog(@"%s",type.c_str());
+            }
+        }
+        
+        ~Bypass() {
+            delete[] this->_pixels;
+        }
+        
+};
 
 enum {
     MSL_INPUT = 0,
+    MSL_PASS,
     MSL_NUM_PARAMS
 };
 
 namespace MSL {
 
-    bool isInit = false;
+    Bypass<unsigned int> *shader = nullptr;
 
-    NSBundle *bundle = [NSBundle bundleWithIdentifier:@"org.mizt.ae.MSL"];
+    PF_Err ParamsSetup(PF_InData *in_data, PF_OutData *out_data) {
+        
+        PF_ParamDef def;
+        AEFX_CLR_STRUCT(def);
+        PF_ADD_SLIDER("Pass",0,32,0,32,0,MSL_PASS);
+        out_data->num_params = MSL_NUM_PARAMS;
+        
+        return PF_Err_NONE;
+    }
 
-    id<MTLDevice> device = nil;
-    id<MTLLibrary> library = nil;
-
-    id<MTLTexture> texture[2] = {nil,nil};
-
-    int texW = 0;
-    int texH = 0;
-
-    id<MTLCommandQueue> queue = nil;
-    id<MTLBuffer> resolution = nil;
-
-    dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
-
-    unsigned int *data = nullptr;
-
-    void render(PF_EffectWorld *input,PF_LayerDef *output,PF_ParamDef *params[]) {
+    PF_Err Render(PF_EffectWorld *input, PF_LayerDef *output, PF_ParamDef *params[]) {
+        
+        unsigned int pass = params[MSL_PASS]->u.sd.value;
                 
         int width  = output->width;
         int height = output->height;
         
-        unsigned int *src = (unsigned int *)input->data;
-        int srcRow = input->rowbytes>>2;
-        
         unsigned int *dst = (unsigned int *)output->data;
         int dstRow = output->rowbytes>>2;
         
-        if(!isInit) {
-                        
-            NSString *path = [[bundle URLForResource:@"default" withExtension:@"metallib"] path];
+        if(width==input->width&&height==input->height) {
             
-            device = MTLCreateSystemDefaultDevice();
-            resolution = [device newBufferWithLength:sizeof(float)*2 options:MTLResourceOptionCPUCacheModeDefault];
+            unsigned int *src = (unsigned int *)input->data;
+            int srcRow = input->rowbytes>>2;
             
-            NSFileManager *fileManager = [NSFileManager defaultManager];
+            if(shader) {
+                if(!(shader->width()==width&&shader->height()==height)) {
+                    delete shader;
+                    shader = nullptr;
+                }
+            }
             
-            dispatch_fd_t fd = open([path UTF8String],O_RDONLY);
-            NSDictionary *attributes = [fileManager attributesOfItemAtPath:path error:nil];
+            NSString *processName = [[NSProcessInfo processInfo] processName];
+            if(FileManager::eq(processName,@"After Effects")) {
+                NSLog(@"Affter Effects: %@",PRODUCT_BUNDLE_IDENTIFIER);
+            }
             
-            long size = [[attributes objectForKey:NSFileSize] integerValue];
+            if(!shader) {
+                shader = new Bypass<unsigned int>(width,height,4,@"default.metallib",PRODUCT_BUNDLE_IDENTIFIER);
+            }
             
-            if(size>0) {
-                        
-                dispatch_read(fd,size,dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT,0),^(dispatch_data_t d, int e) {
+            if(pass==0) {
+                for(int i=0; i<height; i++) {
+                    for(int j=0; j<width; j++) {
+                        dst[i*dstRow+j] = src[i*srcRow+j];
+                    }
+                }
+            }
+            else {
+                if(shader) {
                     
-                    NSError *err = nil;
-                    library = [device newLibraryWithData:d error:&err];
-                    close(fd);
-                    dispatch_semaphore_signal(semaphore);
+                    unsigned int *ptr = shader->exec(shader->BGRA(src,srcRow));
                     
-                });
-                
-                dispatch_semaphore_wait(semaphore,DISPATCH_TIME_FOREVER);
-                isInit = true;
-            }
-        }
-        
-        if(isInit) {
-            
-            int w = ((width+7)>>3)<<3;
-            int h = ((height+7)>>3)<<3;
-            
-            if(!(w==texW&&h==texH)) {
-                
-                texW = w;
-                texH = h;
-                
-                if(data) {
-                    delete[] data;
+                    for(int k=1; k<pass; k++) {
+                        ptr = shader->exec(ptr);
+                    }
+
+                    for(int i=0; i<height; i++) {
+                        for(int j=0; j<width; j++) {
+                            unsigned int pixel = ptr[i*width+j];
+                            dst[i*dstRow+j] = (pixel&0xFFFFFF)<<8|0xFF;
+                        }
+                    }
                 }
-                data = new unsigned int[texW*texH];
-                
-                texture[0] = nil;
-                texture[1] = nil;
-                
-                MTLTextureDescriptor *desc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm width:texW height:texH mipmapped:NO];
-                
-                desc.usage = MTLTextureUsageShaderRead|MTLTextureUsageShaderWrite;
-                
-                texture[0] = [device newTextureWithDescriptor:desc];
-                texture[1] = [device newTextureWithDescriptor:desc];
-                
-            }
-            
-            float *res = (float *)[resolution contents];
-            res[0] = texW;
-            res[1] = texH;
-            
-            for(int i=0; i<height; i++) {
-                for(int j=0; j<width; j++) {
-                    data[i*texW+j] = src[i*srcRow+j];
+                else {
+                    for(int i=0; i<height; i++) {
+                        for(int j=0; j<width; j++) {
+                            dst[i*dstRow+j] = 0xFF0000FF;
+                        }
+                    }
                 }
             }
-                   
-            [texture[0] replaceRegion:MTLRegionMake2D(0,0,texW,texH) mipmapLevel:0 withBytes:data bytesPerRow:texW<<2];
-            
-            NSError *err = nil;
-            id<MTLFunction> function = [library newFunctionWithName:@"processimage"];
-            id<MTLComputePipelineState> pipelineState = [device newComputePipelineStateWithFunction:function error:&err];
-            id<MTLCommandQueue> queue = [device newCommandQueue];
-            
-            id<MTLCommandBuffer> commandBuffer = queue.commandBuffer;
-            id<MTLComputeCommandEncoder> encoder = commandBuffer.computeCommandEncoder;
-            [encoder setComputePipelineState:pipelineState];
-            [encoder setTexture:texture[0] atIndex:0];
-            [encoder setTexture:texture[1] atIndex:1];
-            [encoder setBuffer:resolution offset:0 atIndex:0];
-            
-            MTLSize threadGroupSize = MTLSizeMake(8,8,1);
-            MTLSize threadGroups = MTLSizeMake(texW>>3,texH>>3,1);
-            
-            [encoder dispatchThreadgroups:threadGroups threadsPerThreadgroup:threadGroupSize];
-            [encoder endEncoding];
-            [commandBuffer commit];
-            [commandBuffer waitUntilCompleted];
-            
-            [texture[1] getBytes:data bytesPerRow:texW<<2 fromRegion:MTLRegionMake2D(0,0,texW,texH) mipmapLevel:0];
-            
-            for(int i=0; i<height; i++) {
-                for(int j=0; j<width; j++) {
-                    dst[i*dstRow+j] = data[i*texW+j];
-                }
-            }
-                        
         }
         else {
             
             for(int i=0; i<height; i++) {
                 for(int j=0; j<width; j++) {
-                    dst[i*dstRow+j] = src[i*srcRow+j];
+                    dst[i*dstRow+j] = 0xFF0000FF;
                 }
             }
-             
         }
+        
+        return PF_Err_NONE;
     }
 }
+
