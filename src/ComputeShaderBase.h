@@ -7,6 +7,8 @@ class ComputeShaderBase {
         
         bool _init = false;
         
+        dispatch_semaphore_t _semaphore = dispatch_semaphore_create(0);
+    
         id<MTLDevice> _device = MTLCreateSystemDefaultDevice();
         id<MTLFunction> _function = nil;
         id<MTLComputePipelineState> _pipelineState = nil;
@@ -38,26 +40,15 @@ class ComputeShaderBase {
         
         ~ComputeShaderBase() {
             
+            for(int k=0; k<this->_params.size(); k++) this->_params[k] = nil;
+            for(int k=0; k<this->_texture.size(); k++) this->_texture[k] = nil;
+            for(int k=0; k<this->_buffer.size(); k++) delete this->_buffer[k];
+            for(int k=0; k<this->_arguments.size(); k++) this->_arguments[k] = nil;
+            
             this->_device = nil;
             this->_function = nil;
             this->_pipelineState = nil;
             this->_library = nil;
-            
-            for(int k=0; k<this->_params.size(); k++) {
-                this->_params[k] = nil;
-            }
- 
-            for(int k=0; k<this->_texture.size(); k++) {
-                this->_texture[k] = nil;
-            }
-            
-            for(int k=0; k<this->_buffer.size(); k++) {
-                delete this->_buffer[k];
-            }
-            
-            for(int k=0; k<this->_arguments.size(); k++) {
-                this->_arguments[k] = nil;
-            }
         }
     
         bool setupPipelineState(NSString *func=@"processimage") {
@@ -104,9 +95,7 @@ class ComputeShaderBase {
                 }
                 
             }
-            
-            //NSLog(@"%@",metallib);
-            
+                        
             if(metallib) {
                 NSError *error = nil;
                 this->_library = [this->_device newLibraryWithFile:metallib error:&error];
@@ -153,9 +142,14 @@ class ComputeShaderBase {
                 
                 [encoder dispatchThreadgroups:threadGroups threadsPerThreadgroup:threadGroupSize];
                 [encoder endEncoding];
+                [commandBuffer addCompletedHandler:^(id<MTLCommandBuffer> commandBuffer) {
+                    dispatch_semaphore_signal(this->_semaphore);
+                }];
                 [commandBuffer commit];
                 [commandBuffer waitUntilCompleted];
                 
+                dispatch_semaphore_wait(this->_semaphore,DISPATCH_TIME_FOREVER);
+
             }
         }
 };

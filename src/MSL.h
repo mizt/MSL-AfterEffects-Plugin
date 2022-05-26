@@ -5,6 +5,15 @@
 #import "MTLReadPixels.h"
 #import "ComputeShaderBase.h"
 
+#define BGRA_TO_ABGR(x) ((x&0xFF)<<24|x>>8)
+
+enum {
+    MSL_INPUT = 0,
+    MSL_PASS,
+    MSL_NUM_PARAMS
+};
+
+
 template <typename T>
 class Bypass : public ComputeShaderBase<T> {
 
@@ -28,17 +37,11 @@ class Bypass : public ComputeShaderBase<T> {
         unsigned int *BGRA(T *src, int row) {
             
             if(this->_pixels) {
-                
-                int w = this->_width;
-                int h = this->_height;
-
-                for(int i=0; i<h; i++) {
-                    for(int j=0; j<w; j++) {
-                        unsigned int pixel = src[i*row+j];
-                        this->_pixels[i*w+j] = (pixel&0xFF)<<24|pixel>>8;
+                for(int i=0; i<this->_height; i++) {
+                    for(int j=0; j<this->_width; j++) {
+                        this->_pixels[i*this->_width+j] = BGRA_TO_ABGR(src[i*row+j]);
                     }
                 }
-                
                 return this->_pixels;
             }
             
@@ -101,12 +104,6 @@ class Bypass : public ComputeShaderBase<T> {
         
 };
 
-enum {
-    MSL_INPUT = 0,
-    MSL_PASS,
-    MSL_NUM_PARAMS
-};
-
 namespace MSL {
 
     Bypass<unsigned int> *shader = nullptr;
@@ -143,10 +140,7 @@ namespace MSL {
                 }
             }
             
-            NSString *processName = [[NSProcessInfo processInfo] processName];
-            if(FileManager::eq(processName,@"After Effects")) {
-                NSLog(@"Affter Effects: %@",PRODUCT_BUNDLE_IDENTIFIER);
-            }
+            // bool isAE = FileManager::eq([[NSProcessInfo processInfo] processName],@"After Effects");
             
             if(!shader) {
                 shader = new Bypass<unsigned int>(width,height,4,@"default.metallib",PRODUCT_BUNDLE_IDENTIFIER);
@@ -162,16 +156,15 @@ namespace MSL {
             else {
                 if(shader) {
                     
-                    unsigned int *ptr = shader->exec(shader->BGRA(src,srcRow));
+                    unsigned int *data = shader->exec(shader->BGRA(src,srcRow));
                     
                     for(int k=1; k<pass; k++) {
-                        ptr = shader->exec(ptr);
+                        data = shader->exec(data);
                     }
 
                     for(int i=0; i<height; i++) {
                         for(int j=0; j<width; j++) {
-                            unsigned int pixel = ptr[i*width+j];
-                            dst[i*dstRow+j] = (pixel&0xFFFFFF)<<8|0xFF;
+                            dst[i*dstRow+j] = data[i*width+j]<<8|0xFF;
                         }
                     }
                 }
@@ -196,4 +189,3 @@ namespace MSL {
         return PF_Err_NONE;
     }
 }
-
