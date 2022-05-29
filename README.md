@@ -8,4 +8,4 @@ This plugin (including the Data) is provided to you “as is,” and you agree t
 
 ### Documentation
 
-[https://mizt.github.io/MSL-AfterEffects-Plugin/](https://mizt.github.io/MSL-AfterEffects-Plugin/)
+~[https://mizt.github.io/MSL-AfterEffects-Plugin/](https://mizt.github.io/MSL-AfterEffects-Plugin/)~
