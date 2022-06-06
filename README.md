@@ -5,7 +5,3 @@
 This is an experimental project.  
 **No Warranty**.  
 This plugin (including the Data) is provided to you “as is,” and you agree to use it at your own risk.
-
-### Documentation
-
-~[https://mizt.github.io/MSL-AfterEffects-Plugin/](https://mizt.github.io/MSL-AfterEffects-Plugin/)~
